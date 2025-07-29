@@ -128,6 +128,9 @@ class SearchAlgorithm:
         self.cutoffs = 0
         self.principal_variation = []
         
+        # Store the root player for consistent evaluation
+        self.root_player = board.current_player
+        
         # Clear killer moves for this search
         self.killer_moves.clear()
         
@@ -203,8 +206,30 @@ class SearchAlgorithm:
             if not board_copy.make_move(move):
                 continue
             
-            # Search this move
-            score = -self._minimax(board_copy, depth - 1, -beta, -alpha, False)
+            # Check for immediate win first
+            win_result = self.win_detector.check_win(board_copy)
+            if win_result and win_result.winner == player:
+                # Immediate win - return immediately with highest score
+                return SearchResult(
+                    best_move=move,
+                    score=self.MATE_SCORE - (self.MAX_DEPTH - depth),
+                    depth=depth,
+                    nodes_evaluated=self.nodes_evaluated,
+                    time_elapsed=time.time() - self.start_time,
+                    principal_variation=[move]
+                )
+            
+            # Check if this blocks opponent's immediate win
+            opponent = Player.O if player == Player.X else Player.X
+            opponent_wins_before = self.win_detector.find_immediate_wins(board, opponent)
+            opponent_wins_after = self.win_detector.find_immediate_wins(board_copy, opponent)
+            
+            if len(opponent_wins_before) > 0 and len(opponent_wins_after) == 0:
+                # This move blocks an immediate threat - give it very high priority
+                score = self.MATE_SCORE - 100  # Slightly less than immediate win
+            else:
+                # Search this move normally
+                score = -self._minimax(board_copy, depth - 1, -beta, -alpha, False)
             
             if score > best_score:
                 best_score = score
@@ -351,16 +376,17 @@ class SearchAlgorithm:
         self.nodes_evaluated += 1
         
         if self._is_time_up() or depth <= 0:
-            player = board.current_player if maximizing else (
-                Player.O if board.current_player == Player.X else Player.X
-            )
-            return self.position_evaluator.evaluate_position(board, player)
+            # Always evaluate from the root player's perspective
+            # The root player is stored when search begins
+            root_player = getattr(self, 'root_player', board.current_player)
+            eval_score = self.position_evaluator.evaluate_position(board, root_player)
+            return eval_score if maximizing else -eval_score
         
         # Stand pat evaluation
-        player = board.current_player if maximizing else (
-            Player.O if board.current_player == Player.X else Player.X
-        )
-        stand_pat = self.position_evaluator.evaluate_position(board, player)
+        root_player = getattr(self, 'root_player', board.current_player)
+        stand_pat = self.position_evaluator.evaluate_position(board, root_player)
+        if not maximizing:
+            stand_pat = -stand_pat
         
         if maximizing:
             if stand_pat >= beta:
@@ -443,8 +469,11 @@ class SearchAlgorithm:
                 
                 # Blocking opponent wins gets high priority
                 opponent = Player.O if player == Player.X else Player.X
-                opponent_wins = self.win_detector.find_immediate_wins(board, opponent)
-                if pos_id in opponent_wins:
+                opponent_wins_before = self.win_detector.find_immediate_wins(board, opponent)
+                opponent_wins_after = self.win_detector.find_immediate_wins(test_board, opponent)
+                
+                # If opponent had immediate wins before but not after, this is a blocking move
+                if len(opponent_wins_before) > len(opponent_wins_after):
                     score += 15000
                 
                 # Position evaluation
@@ -466,6 +495,9 @@ class SearchAlgorithm:
         """
         Get tactical moves for quiescence search.
         
+        Only include moves that are critical for the current player to consider.
+        This prevents the search from helping the opponent find good moves.
+        
         Args:
             board: Current board state
             
@@ -474,22 +506,30 @@ class SearchAlgorithm:
         """
         player = board.current_player
         opponent = Player.O if player == Player.X else Player.X
+        root_player = getattr(self, 'root_player', player)
         
         tactical_moves = set()
         
-        # Immediate wins
-        wins = self.win_detector.find_immediate_wins(board, player)
-        tactical_moves.update(wins)
-        
-        # Blocking opponent wins
-        blocks = self.win_detector.find_immediate_wins(board, opponent)
-        tactical_moves.update(blocks)
-        
-        # High-value threats
-        threats = self.win_detector.find_threats(board, player)
-        for threat in threats:
-            if threat.severity >= 2:  # Two or more pieces in pattern
-                tactical_moves.update(threat.completing_moves)
+        # Only explore tactical moves if current player is the root player
+        # This prevents helping the opponent find good responses
+        if player == root_player:
+            # Immediate wins for root player
+            wins = self.win_detector.find_immediate_wins(board, player)
+            tactical_moves.update(wins)
+            
+            # High-value threats for root player
+            threats = self.win_detector.find_threats(board, player)
+            for threat in threats:
+                if threat.severity >= 3:  # Only very high threats
+                    tactical_moves.update(threat.completing_moves)
+        else:
+            # If it's opponent's turn, only consider defensive moves
+            # Immediate wins for opponent (we need to be aware of these)
+            opponent_wins = self.win_detector.find_immediate_wins(board, player)
+            if opponent_wins:
+                # If opponent has immediate wins, this is a critical position
+                # Include the winning moves so we can see the threat
+                tactical_moves.update(opponent_wins)
         
         return list(tactical_moves)
     

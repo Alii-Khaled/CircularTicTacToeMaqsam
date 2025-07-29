@@ -362,10 +362,21 @@ class AIEngine:
         else:
             # Check for blocks
             opponent = Player.O if player == Player.X else Player.X
-            immediate_blocks = self.win_detector.find_immediate_wins(board, opponent)
+            opponent_wins = self.win_detector.find_immediate_wins(board, opponent)
             
-            if immediate_blocks:
-                best_position = immediate_blocks[0]
+            # Find positions that block opponent's wins
+            blocking_moves = []
+            if opponent_wins:
+                for empty_pos in empty_positions:
+                    test_board = board.copy()
+                    test_move = Move(position=empty_pos.id, player=player)
+                    if test_board.make_move(test_move):
+                        opponent_wins_after = self.win_detector.find_immediate_wins(test_board, opponent)
+                        if len(opponent_wins_after) < len(opponent_wins):
+                            blocking_moves.append(empty_pos.id)
+            
+            if blocking_moves:
+                best_position = blocking_moves[0]
                 evaluation_score = 500.0
                 reasoning = "Blocking opponent's winning move"
             else:

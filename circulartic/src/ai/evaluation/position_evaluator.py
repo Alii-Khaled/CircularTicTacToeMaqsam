@@ -43,10 +43,10 @@ class PositionEvaluator:
     """
     
     # Evaluation weights
-    CENTER_CONTROL_WEIGHT = 0.30
-    PATTERN_POTENTIAL_WEIGHT = 0.40
-    RING_DOMINANCE_WEIGHT = 0.20
-    THREAT_ASSESSMENT_WEIGHT = 0.10
+    CENTER_CONTROL_WEIGHT = 0.20
+    PATTERN_POTENTIAL_WEIGHT = 0.20
+    RING_DOMINANCE_WEIGHT = 0.10
+    THREAT_ASSESSMENT_WEIGHT = 0.50  # Increased to make threats more important
     
     # Position values by ring
     RING_VALUES = {
@@ -269,7 +269,7 @@ class PositionEvaluator:
         
         # Immediate wins are extremely valuable
         score += len(player_wins) * 1000
-        score -= len(opponent_wins) * 1000
+        score -= len(opponent_wins) * 5000  # Much higher penalty for allowing opponent wins
         
         # Find threats for both players
         player_threats = self.win_detector.find_threats(board, player)
