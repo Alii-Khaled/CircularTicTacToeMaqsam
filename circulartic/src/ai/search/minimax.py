@@ -13,6 +13,7 @@ from ...models.move import Move
 from ...game.board import CircularBoard
 from ..evaluation.position_evaluator import PositionEvaluator
 from ..evaluation.win_detector import WinDetector
+from ..evaluation.fork_detector import ForkDetector
 
 
 @dataclass
@@ -83,6 +84,7 @@ class SearchAlgorithm:
         """Initialize the search algorithm."""
         self.position_evaluator = PositionEvaluator()
         self.win_detector = WinDetector()
+        self.fork_detector = ForkDetector()
         
         # Search statistics
         self.nodes_evaluated = 0
@@ -133,6 +135,10 @@ class SearchAlgorithm:
         
         # Clear killer moves for this search
         self.killer_moves.clear()
+        
+        # Clear fork detection cache
+        if hasattr(self, '_cached_fork_prevention'):
+            delattr(self, '_cached_fork_prevention')
         
         best_move = None
         best_score = float('-inf')
@@ -219,14 +225,21 @@ class SearchAlgorithm:
                     principal_variation=[move]
                 )
             
-            # Check if this blocks opponent's immediate win
+            # Check if this blocks opponent's immediate win or fork threats
             opponent = Player.O if player == Player.X else Player.X
             opponent_wins_before = self.win_detector.find_immediate_wins(board, opponent)
             opponent_wins_after = self.win_detector.find_immediate_wins(board_copy, opponent)
             
-            if len(opponent_wins_before) > 0 and len(opponent_wins_after) == 0:
-                # This move blocks an immediate threat - give it very high priority
+            # Check for fork threats using the dedicated fork detector
+            fork_prevention_moves = self.fork_detector.find_fork_prevention_moves(board, opponent)
+            is_fork_prevention = move_pos in fork_prevention_moves
+            
+            if len(opponent_wins_before) > len(opponent_wins_after):
+                # This move blocks at least one immediate threat - give it very high priority
                 score = self.MATE_SCORE - 100  # Slightly less than immediate win
+            elif is_fork_prevention:
+                # This move blocks a fork threat - also very high priority
+                score = self.MATE_SCORE - 200  # Slightly less than blocking immediate win
             else:
                 # Search this move normally
                 score = -self._minimax(board_copy, depth - 1, -beta, -alpha, False)
@@ -476,6 +489,16 @@ class SearchAlgorithm:
                 if len(opponent_wins_before) > len(opponent_wins_after):
                     score += 15000
                 
+                # Check for fork threats and prevention (cached for performance)
+                if not hasattr(self, '_cached_fork_prevention'):
+                    self._cached_fork_prevention = self.fork_detector.find_fork_prevention_moves(board, opponent)
+                
+                if pos_id in self._cached_fork_prevention:
+                    score += 12000  # High priority for fork prevention
+                
+                # Skip expensive fork creation check for move ordering to improve performance
+                # Fork creation will be handled in the main search evaluation
+                
                 # Position evaluation
                 eval_score = self.position_evaluator.evaluate_position(test_board, player)
                 score += eval_score
@@ -522,6 +545,12 @@ class SearchAlgorithm:
             for threat in threats:
                 if threat.severity >= 3:  # Only very high threats
                     tactical_moves.update(threat.completing_moves)
+            
+            # Fork creation moves for root player
+            fork_threats = self.fork_detector.find_fork_threats(board, player)
+            for fork_threat in fork_threats:
+                if fork_threat.is_unstoppable():
+                    tactical_moves.add(fork_threat.trigger_position)
         else:
             # If it's opponent's turn, only consider defensive moves
             # Immediate wins for opponent (we need to be aware of these)
@@ -530,6 +559,11 @@ class SearchAlgorithm:
                 # If opponent has immediate wins, this is a critical position
                 # Include the winning moves so we can see the threat
                 tactical_moves.update(opponent_wins)
+        
+        # Always include fork prevention moves regardless of whose turn it is
+        # This ensures we're aware of critical defensive positions
+        fork_prevention_moves = self.fork_detector.find_fork_prevention_moves(board, opponent)
+        tactical_moves.update(fork_prevention_moves)
         
         return list(tactical_moves)
     
