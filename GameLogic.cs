@@ -272,6 +272,29 @@ namespace WpfApp1
             return moves[randIdx];
         }
 
+        private int pythonMove(moveType type)
+        {
+            string board = "";
+            for (int i = 0; i < 32; i++)
+            {
+                if (visited[i] == moveType.EMPTY)
+                    board += "_";
+                else if (visited[i] == moveType.X)
+                    board += "X";
+                else
+                    board += "O";
+            }
+            Process process = new Process();
+            process.StartInfo.FileName = "python";
+            process.StartInfo.Arguments = $"circulartic/ai_move_suggester.py {board} {type} --time-limit 5.0";
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.RedirectStandardOutput = true;
+            process.Start();
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            return int.Parse(output);
+        }
+
         public int computerMove(moveType type, levelType level)
         {
             int cnt = 0;
@@ -287,7 +310,7 @@ namespace WpfApp1
             if (level == levelType.EASY || cnt == 0)
                 move = randomMove();
             else if (level == levelType.HARD)
-                move = findBestMove(type);
+                move = pythonMove(type);
             else 
                 move = mediumMove(type);
 
