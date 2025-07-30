@@ -190,4 +190,9 @@ git_stats/*
 StyleCop.Cache
 bin
 obj
-circular_ttt_env
+
+
+**/.venv/
+**/__pycache__/
+**/.vscode/
+ppo/models/
